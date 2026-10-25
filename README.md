@@ -1,2 +1,2 @@
 # Cpp-WebSocket_Project
-基于Cpp
+基于Cpp和WebSocket开发的五子棋游戏对战平台
