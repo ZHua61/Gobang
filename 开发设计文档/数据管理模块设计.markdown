@@ -1,0 +1,163 @@
+# 数据管理模块设计
+
+## 1. 模块概述
+
+数据管理模块负责与 MySQL 数据库交互，针对每一张数据表封装一个管理类，通过类实例化出的对象管理指定的数据库表。当前项目仅有一张用户信息表 `users`，对应封装类为 `user_table`。
+
+- 涉及文件：`db.hpp`（`user_table` 类）、`db.sql`（建库建表脚本）
+- 依赖：`util.hpp`（`MySQL_Util`）、`logger.hpp`、`<mutex>`、`<assert.h>`
+
+## 2. 数据库表的设计
+
+### 2.1 用户信息表（users）
+
+| 字段 | 类型 | 约束 / 说明 |
+| ---- | ---- | ----------- |
+| `id` | `int` | **主键**，自增（`auto_increment`） |
+| `username` | `varchar(32)` | 唯一键（`unique`），不允许为空 |
+| `password` | `varchar(128)` | 不允许为空，存储 **MySQL `PASSWORD()` 加密后的密文** |
+| `score` | `int` | 段位分数（注册时初始化为 **1000**） |
+| `total_count` | `int` | 总游戏场数 |
+| `win_count` | `int` | 获胜场数 |
+
+### 2.2 建表 SQL（db.sql）
+
+```sql
+drop database if exists gobang;
+create database if not exists gobang;
+use gobang;
+
+create table if not exists users (
+    id int primary key auto_increment,
+    username varchar(32) unique key not null,
+    password varchar(128) not null,
+    score int,
+    total_count int,
+    win_count int
+);
+```
+
+> **字段说明（与代码对应）**
+> - `username` 加 `unique key` 约束：保证用户名唯一，重复注册时数据库层直接拒绝，作为 `insert` 失败（"用户名已经被占用"）的兜底。
+> - `password` 使用 `varchar(128)` 而非 `varchar(32)`：密码通过 MySQL 的 `PASSWORD()` 函数加密后存储，密文长度大于 32 字节，必须留足空间。
+> - `score` 默认值未在表结构中体现，而是在注册 `insert` 的 SQL 里显式写入初始值 **1000**（见 3.3 节）。
+
+## 3. user_table 类的封装实现
+
+```cpp
+class user_table
+{
+    private:
+        MYSQL *_mysql;     // 操作句柄
+        std::mutex _mutex; // 互斥锁（保护共用句柄上的查询操作）
+
+    public:
+        user_table(host, username, password, dbname, port = 3306); // 构造：连接数据库
+        ~user_table();                                             // 析构：释放句柄
+        bool insert(Json::Value &user);              // 新用户注册
+        bool login(Json::Value &user);               // 用户登录验证，返回用户信息
+        bool select_by_name(const std::string &name, Json::Value &user); // 按用户名查询
+        bool select_by_id(uint64_t id, Json::Value &user);               // 按用户ID查询
+        bool win(uint64_t id);                       // 胜利：段位分+30，场次+1，胜场+1
+        bool lose(int id);                           // 失败：段位分-30，场次+1
+};
+```
+
+- 构造函数通过 `MySQL_Util::mysql_create(...)` 建立数据库连接，并用 `assert(_mysql != NULL)` 保证连接成功。
+- 析构函数调用 `MySQL_Util::mysql_destroy(_mysql)` 释放句柄。
+
+## 4. 各接口的实现要点
+
+### 4.1 注册（insert）
+
+```cpp
+bool insert(Json::Value &user)
+```
+
+- SQL：`INSERT users values(null, '%s', password('%s'), 1000, 0, 0);`
+- 处理流程：
+  1. 校验 `username` / `password` 非空，缺失直接返回 `false`；
+  2. 用 `sprintf` 拼装 SQL，密码经 `password()` 函数**加密后入库**，段位分数初始化为 `1000`，场次均为 `0`；
+  3. 执行 SQL，失败（含用户名重复）打印日志并返回 `false`。
+
+### 4.2 登录验证（login）
+
+```cpp
+bool login(Json::Value &user)
+```
+
+- SQL：`SELECT id, score, total_count, win_count FROM users WHERE username='%s' AND password=password('%s');`
+- 处理流程：
+  1. 加锁后执行查询，`mysql_store_result` 获取结果集；
+  2. 用 `mysql_num_rows` 校验**结果唯一**（必须恰好 1 行，否则登录失败）；
+  3. `mysql_fetch_row` 取出数据，把 `id / score / total_count / win_count` 写回 `user` 对象；
+  4. 释放结果集，返回 `true`。
+- 注意：登录 SQL 中密码同样经过 `password()` 加密后再比对，因此**无需解密**即可完成校验；登录返回的信息不含 `username`，客户端展示完整资料时走 `GET /info`（内部调用 `select_by_id`）。
+
+### 4.3 按用户名查询（select_by_name）
+
+```cpp
+bool select_by_name(const std::string &name, Json::Value &user)
+```
+
+- SQL：`SELECT id, score, total_count, win_count FROM users WHERE username='%s';`
+- 流程与 `login` 一致（加锁查询 → 结果唯一性校验 → 写回 `user`），并把 `username` 一并写回。
+
+### 4.4 按用户 ID 查询（select_by_id）
+
+```cpp
+bool select_by_id(uint64_t id, Json::Value &user)
+```
+
+- SQL：`SELECT username, score, total_count, win_count FROM users WHERE id='%lu';`
+- 流程同上，写回 `id / username / score / total_count / win_count`，供大厅展示玩家信息、匹配模块读取段位分数使用。
+
+### 4.5 胜利结算（win）
+
+```cpp
+bool win(uint64_t id)
+```
+
+- SQL：`UPDATE users SET score=score+30, total_count=total_count+1, win_count=win_count+1 WHERE id='%lu';`
+- 效果：段位分数 **+30**、总场数 **+1**、胜场数 **+1**。
+
+### 4.6 失败结算（lose）
+
+```cpp
+bool lose(int id)
+```
+
+- SQL：`UPDATE users SET score=score-30, total_count=total_count+1 WHERE id='%d';`
+- 效果：段位分数 **-30**、总场数 **+1**，胜场数不变。
+
+> 胜负结算在游戏房间模块产生赢家后调用：`gameroom::handle_request` 判定出 `winner` 后，分别对赢家调用 `win`、对输家调用 `lose`。
+
+## 5. 实现要点与注意事项
+
+### 5.1 线程安全
+
+- `login` / `select_by_name` / `select_by_id` 三个**查询**接口内部使用 `std::unique_lock<std::mutex>` 加锁：因为多个业务线程（匹配线程、房间线程等）共享同一个 `MYSQL` 句柄，且查询需要 `mysql_store_result` 取结果，必须互斥执行。
+- `insert` / `win` / `lose` 三个**写入**接口当前未加锁。由于它们共用同一 `MYSQL` 句柄，若需支持多线程并发写，建议与查询接口一致地加锁保护。
+
+### 5.2 结果唯一性校验
+
+- `login` / `select_by_name` / `select_by_id` 均要求查询结果**恰好一行**（`mysql_num_rows == 1`），多于或少于一行都视为失败，防止用户名冲突或数据异常导致的错误返回。
+
+### 5.3 SQL 拼装的注入风险（建议改进）
+
+- 当前实现使用 `sprintf` 直接把用户输入拼进 SQL 字符串，存在 **SQL 注入**风险（如用户名或密码中含 `'` 等特殊字符）。
+- 建议改用 **预处理语句 / 参数绑定**（`mysql_stmt_prepare` 系列接口），或至少对输入做转义处理。
+
+### 5.4 代码层面的小问题
+
+- `user_table` 析构函数中 `_mysql == NULL;` 是一个无实际作用的表达式（仅比较、结果被丢弃），若意在置空指针应写作 `_mysql = NULL;`，但鉴于对象即将析构，此行可以删除。
+
+## 6. 涉及文件与依赖
+
+- 涉及文件：`db.hpp`（`user_table`）、`db.sql`（建库建表脚本）
+- 依赖：
+  - `util.hpp`：`MySQL_Util`（句柄创建 / 执行 / 释放）
+  - `logger.hpp`（日志输出）
+  - MySQL C API（`mysql/mysql.h`，`-lmysqlclient`）
+  - jsoncpp（`Json::Value` 承载用户信息）
+            

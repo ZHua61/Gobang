@@ -1,0 +1,15 @@
+# 编译产物
+gobang
+*.o
+*.obj
+*.exe
+*.out
+
+# 日志与运行时文件
+*.log
+core
+core.*
+
+# 编辑器 / 操作系统文件
+.DS_Store
+Thumbs.db

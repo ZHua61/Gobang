@@ -1,0 +1,32 @@
+/* ===== 游戏大厅页样式 ===== */
+#screen {
+    width: 480px;
+    padding: 30px;
+    margin-bottom: 30px;
+    text-align: center;
+    line-height: 2;
+    font-size: 18px;
+    color: #333;
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+#match-button {
+    width: 200px;
+    height: 50px;
+    margin: 0 auto;
+    line-height: 50px;
+    text-align: center;
+    color: #fff;
+    font-size: 20px;
+    background: linear-gradient(90deg, #1e3c72, #2a5298);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: transform 0.2s, opacity 0.2s;
+}
+
+#match-button:hover {
+    transform: scale(1.05);
+    opacity: 0.9;
+}

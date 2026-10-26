@@ -1,0 +1,38 @@
+/* ===== 公共样式：重置 / 导航栏 / 容器 / 通用按钮 ===== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    min-height: 100vh;
+    background: #f0f2f5;
+}
+
+/* 顶部导航栏 */
+.nav {
+    height: 60px;
+    line-height: 60px;
+    text-align: center;
+    color: #fff;
+    font-size: 22px;
+    font-weight: bold;
+    background: linear-gradient(90deg, #1e3c72, #2a5298);
+}
+
+/* 页面主体容器 */
+.container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 20px;
+}
+
+/* 通用按钮 */
+button {
+    border: none;
+    outline: none;
+    cursor: pointer;
+}

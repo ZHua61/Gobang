@@ -1,0 +1,136 @@
+# 工具模块设计
+
+## 1. 模块概述
+
+工具模块为整个项目提供基础能力封装，包含四个工具类：
+
+| 类名 | 功能 |
+| ---- | ---- |
+| `MySQL_Util` | 数据库连接创建、SQL 执行、句柄释放 |
+| `Json_Util` | JSON 序列化与反序列化 |
+| `String_Util` | 字符串分割 |
+| `File_Util` | 文件内容读取 |
+
+- 涉及文件：`util.hpp`
+- 依赖：`mysql/mysql.h`、`jsoncpp/json/json.h`、`logger.hpp`
+
+## 2. MySQL_Util —— 数据库操作封装
+
+对 MySQL 句柄的创建、语句执行、句柄销毁进行封装，全部为**静态方法**。
+
+### 2.1 创建句柄并连接数据库
+
+```cpp
+static MYSQL *mysql_create(
+    const std::string &host,
+    const std::string &username,
+    const std::string &password,
+    const std::string &dbname,
+    uint16_t port = 3306)
+```
+
+处理流程：
+
+1. `mysql_init(NULL)` 初始化 MySQL 句柄，失败则打印错误并返回 `NULL`
+2. `mysql_real_connect()` 连接数据库（已指定库名），失败则关闭句柄并返回 `NULL`
+3. `mysql_set_character_set(mysql, "utf8")` 设置客户端字符集为 UTF-8，保证中文正常读写
+4. 返回连接成功的句柄
+
+**返回值**：`MYSQL *` —— 成功返回有效句柄，失败返回 `NULL`。
+
+### 2.2 执行 SQL 语句
+
+```cpp
+static bool mysql_execute(MYSQL *mysql, const std::string &sql)
+```
+
+- 调用 `mysql_query()` 执行 SQL
+- 成功返回 `true`；失败打印 SQL 原文与 `mysql_error()` 错误信息，返回 `false`
+
+**返回值**：`bool` —— 执行是否成功。
+
+> 注意：`mysql_execute` 适用于执行**无结果集**的语句（`INSERT` / `UPDATE` / `DELETE` 及建表等 DDL）。对于需要取回数据的 `SELECT`，仍需由调用方在 `mysql_query` 成功后配合 `mysql_store_result` / `mysql_fetch_row` 自行取结果——数据管理模块 `user_table` 中的登录与查询接口正是这样做的（内部自带互斥锁保护共用句柄）。
+
+### 2.3 释放句柄
+
+```cpp
+static void mysql_destroy(MYSQL *mysql)
+```
+
+- 判空后调用 `mysql_close()` 关闭连接并释放资源
+
+**返回值**：无。
+
+## 3. Json_Util —— JSON 序列化封装
+
+基于 jsoncpp 库，负责 `Json::Value` 对象与 JSON 字符串之间的转换。
+
+### 3.1 序列化
+
+```cpp
+static bool serialize(const Json::Value &js, std::string &str)
+```
+
+- 使用 `Json::StreamWriterBuilder` 创建写入器
+- 开启 `emitUTF8 = true`，保证中文以 UTF-8 原样输出
+- 缩进设置为两个空格，结果经 `std::stringstream` 写入 `str`
+- 失败打印错误日志并返回 `false`
+
+**返回值**：`bool` —— 序列化是否成功；`str` 为输出的 JSON 字符串。
+
+### 3.2 反序列化
+
+```cpp
+static bool deserialize(const std::string &str, Json::Value &js)
+```
+
+- 使用 `Json::CharReaderBuilder` 创建解析器
+- 解析成功则结果写入 `js`；失败打印错误信息并返回 `false`
+
+**返回值**：`bool` —— 反序列化是否成功；`js` 为解析出的 `Json::Value`。
+
+## 4. String_Util —— 字符串分割
+
+```cpp
+static int split(
+    const std::string &src,   /* 源字符串 */
+    const std::string &sep,   /* 分隔符 */
+    std::vector<std::string> &res)
+```
+
+处理逻辑：
+
+- 通过 `std::string::find` 循环查找分隔符并截取子串
+- **连续出现的分隔符自动跳过**，不产生空字符串
+- 末尾无分隔符时，剩余部分整体作为一个子串
+
+**返回值**：`int` —— 分割得到的子串个数，结果存放于 `res`。
+
+示例：
+
+```cpp
+std::string str = ",...,123,,234,,,,,345";
+std::vector<std::string> arry;
+String_Util::split(str, ",", arry);
+// arry: ["...", "123", "234", "345"]
+```
+
+## 5. File_Util —— 文件读取
+
+```cpp
+static bool read(const std::string &filename, std::string &body)
+```
+
+处理流程：
+
+1. 以二进制方式（`std::ios::binary`）打开文件，打开失败打印错误并返回 `false`
+2. 通过 `seekg` / `tellg` 获取文件大小
+3. 为 `body` 分配空间后一次性 `read` 读入全部内容
+4. 读取失败打印错误日志并返回 `false`
+
+**返回值**：`bool` —— 读取是否成功；`body` 为文件内容（主要用于 HTML 等静态资源读取）。
+
+## 6. 编译依赖
+
+- MySQL C API：头文件 `mysql/mysql.h`，链接库 `-lmysqlclient`
+- jsoncpp：头文件 `jsoncpp/json/json.h`，链接库 `-ljsoncpp`

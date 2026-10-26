@@ -1,0 +1,83 @@
+/* ===== 游戏房间页样式 ===== */
+.container {
+    align-items: flex-start;
+    gap: 30px;
+}
+
+/* 棋盘区域 */
+#chess_area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+}
+
+#chess {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+#chess_area #screen {
+    width: 450px;
+    padding: 12px;
+    text-align: center;
+    color: #333;
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+/* 聊天区域 */
+#chat_area {
+    display: flex;
+    flex-direction: column;
+    width: 400px;
+    height: 300px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+#chat_show {
+    flex: 1;
+    padding: 15px;
+    overflow-y: auto;
+    border-bottom: 1px solid #eee;
+}
+
+#self_msg {
+    text-align: right;
+    color: #2a5298;
+}
+
+#peer_msg {
+    text-align: left;
+    color: #555;
+}
+
+#msg_show {
+    display: flex;
+    gap: 10px;
+    padding: 12px;
+}
+
+#chat_input {
+    flex: 1;
+    height: 34px;
+    padding: 0 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#chat_button {
+    width: 70px;
+    height: 34px;
+    color: #fff;
+    background: #2a5298;
+    border-radius: 4px;
+}
+
+#chat_button:hover {
+    background: #1e3c72;
+}

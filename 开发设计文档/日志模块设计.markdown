@@ -1,0 +1,81 @@
+# 日志模块设计
+
+## 1. 模块概述
+
+日志模块用于向标准输出打印带**线程 ID、时间、文件、行号**信息的日志，方便程序调试与错误定位。该模块采用宏实现，无类封装，使用成本低。
+
+- 涉及文件：`logger.hpp`
+- 依赖：`stdio.h`、`time.h`、`pthread.h`
+
+## 2. 日志级别定义
+
+| 宏名 | 值 | 说明 |
+| ---- | -- | ---- |
+| `INF` | 0 | 信息级别日志 |
+| `DBG` | 1 | 调试级别日志 |
+| `ERROR` | 2 | 错误级别日志 |
+| `DEFAULT_LOG_LEVEL` | `DBG`(1) | 默认过滤级别 |
+
+- 只有 `level >= DEFAULT_LOG_LEVEL` 的日志才会被输出
+- 通过修改 `DEFAULT_LOG_LEVEL` 可整体调整日志输出粒度（如改为 `ERROR` 只输出错误）
+
+## 3. 日志宏的实现
+
+核心宏 `LOG(level, format, ...)`：
+
+```c
+#define LOG(level, format, ...) do{ \
+    if(level < DEFAULT_LOG_LEVEL) break; \
+    time_t t=time(NULL);/*获取当前时间*/ \
+    struct tm *ltm=localtime(&t);  /*将时间转换为本地时间*/ \
+    char tmp[32]={0};  \
+    strftime(tmp, 31, "%H:%M:%S", ltm); /*格式化时间*/ \
+    fprintf(stdout,"[%p %s %s %d]" format "\n",(void *)pthread_self(),tmp ,__FILE__, __LINE__, ##__VA_ARGS__); \
+}while(0)
+```
+
+### 3.1 输出格式
+
+```
+[线程ID 时间(HH:MM:SS) 文件名 行号] 日志内容
+```
+
+各组成部分说明：
+
+| 组成部分 | 来源 | 说明 |
+| -------- | ---- | ---- |
+| 线程 ID | `pthread_self()` | 便于多线程环境下定位日志来源 |
+| 时间 | `time()` + `localtime()` + `strftime()` | 精确到秒，格式 `HH:MM:SS` |
+| 文件 | `__FILE__` | 编译器内置宏，指明日志所在源文件 |
+| 行号 | `__LINE__` | 编译器内置宏，指明日志所在代码行 |
+
+### 3.2 实现要点
+
+- **级别过滤**：宏入口先判断 `level < DEFAULT_LOG_LEVEL`，不满足则直接跳出
+- **`do{...}while(0)` 包裹**：保证宏在 `if/else` 等场景展开后不产生分号问题
+- **可变参数**：`##__VA_ARGS__` 支持零个或多个参数，用法与 `printf` 一致
+- **输出目标**：`fprintf(stdout, ...)` 输出到标准输出
+
+## 4. 对外提供的三个宏
+
+| 宏 | 对应级别 | 用途 |
+| -- | -------- | ---- |
+| `INF_LOG(format, ...)` | `INF` | 一般信息输出 |
+| `DBG_LOG(format, ...)` | `DBG` | 调试信息输出 |
+| `ERROR_LOG(format, ...)` | `ERROR` | 错误信息输出 |
+
+## 5. 使用示例
+
+```cpp
+DBG_LOG("Insert user failed!\n");
+ERROR_LOG("mysql_query failed:%s", mysql_error(mysql));
+DBG_LOG("%s", body.c_str());
+```
+
+## 6. 注意事项
+
+- 宏支持可变参数，可像 `printf` 一样直接传参，但**格式化占位符需要用户自行保证与实参匹配**
+- 默认级别为 `DBG`，因此 `DBG` 与 `ERROR` 日志默认都会输出，`INF` 默认不输出
+- 日志输出到标准输出，可通过重定向收集到日志文件
+- 头文件通过 `#ifndef __M_LOGGER_H__` 防止重复包含；`LOG` 为宏实现，仅在编译期展开、无运行时函数调用开销，且不满足级别过滤的日志**不会执行任何参数求值**，可放心用于高频调用点
+- 三个对外宏（`INF_LOG` / `DBG_LOG` / `ERROR_LOG`）最终都展开为 `LOG`，需在包含本头文件（或间接包含 `util.hpp`）的源文件中使用；展开后自带分号语义，调用时写法与普通函数一致即可
